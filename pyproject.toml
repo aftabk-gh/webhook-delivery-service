@@ -1,0 +1,7 @@
+[project]
+name = "webhook-delivery-service"
+version = "0.1.0"
+description = "Production-grade webhook delivery infrastructure. Multi-tenant event ingestion, reliable HTTP delivery with retries, circuit breaker, HMAC signing, rate limiting, and semantic log search via pgvector."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = []
