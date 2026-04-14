@@ -5,8 +5,10 @@ description = "Production-grade webhook delivery infrastructure. Multi-tenant ev
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "asyncpg>=0.31.0",
     "fastapi>=0.135.3",
     "pydantic-settings>=2.13.1",
+    "sqlalchemy>=2.0.49",
     "uvicorn>=0.44.0",
 ]
 

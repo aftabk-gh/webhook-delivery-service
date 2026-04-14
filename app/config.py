@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     app_name: str = "webhook-delivery-service"
     debug: bool = False
     database_url: str
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
     redis_url: str
     secret_key: str
 
