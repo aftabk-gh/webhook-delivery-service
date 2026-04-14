@@ -1,10 +1,9 @@
 from fastapi import FastAPI, status
 from pydantic import BaseModel
 
-from app.config import get_settings
+from app.config import settings
 
 app = FastAPI()
-settings = get_settings()
 
 
 class HealthResponse(BaseModel):
