@@ -4,7 +4,10 @@ version = "0.1.0"
 description = "Production-grade webhook delivery infrastructure. Multi-tenant event ingestion, reliable HTTP delivery with retries, circuit breaker, HMAC signing, rate limiting, and semantic log search via pgvector."
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "fastapi>=0.135.3",
+    "uvicorn>=0.44.0",
+]
 
 [dependency-groups]
 dev = [
@@ -14,7 +17,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py313" # ruff does not support Python 3.14 yet
 line-length = 88
 
 [tool.ruff.lint]
