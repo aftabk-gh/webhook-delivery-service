@@ -3,7 +3,7 @@ name = "webhook-delivery-service"
 version = "0.1.0"
 description = "Production-grade webhook delivery infrastructure. Multi-tenant event ingestion, reliable HTTP delivery with retries, circuit breaker, HMAC signing, rate limiting, and semantic log search via pgvector."
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.18.4",
     "asyncpg>=0.31.0",
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py313" # ruff does not support Python 3.14 yet
+target-version = "py312"
 line-length = 88
 exclude = ["alembic/versions/*"]
 
@@ -64,7 +64,7 @@ indent-style = "space"
 docstring-code-format = true
 
 [tool.mypy]
-python_version = "3.14"
+python_version = "3.12"
 strict = true
 pretty = true
 ignore_missing_imports = true
