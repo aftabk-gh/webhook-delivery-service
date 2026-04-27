@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, status
 from pydantic import BaseModel
+from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -14,7 +15,10 @@ from app.schemas import TenantCreate, TenantResponse
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    await verify_redis()
+    try:
+        await verify_redis()
+    except RedisError as e:
+        print("Redis unavailable on startup: %s", e)
     yield
     await redis_client.aclose()
 
@@ -30,8 +34,13 @@ class HealthResponse(BaseModel):
 
 @app.get("/ping", response_model=HealthResponse, status_code=status.HTTP_200_OK)
 async def health_check() -> HealthResponse:
-    await redis_client.ping()  # type: ignore[misc]
-    return HealthResponse(status="ok", app_name=settings.app_name, redis="ok")
+    try:
+        await redis_client.ping()  # type: ignore[misc]
+        redis_status = "ok"
+    except RedisError as e:
+        print("Redis ping failed: %s", e)
+        redis_status = "unavailable"
+    return HealthResponse(status="ok", app_name=settings.app_name, redis=redis_status)
 
 
 @app.post("/tenant", response_model=TenantResponse, status_code=status.HTTP_201_CREATED)
