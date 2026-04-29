@@ -10,6 +10,7 @@ engine = create_async_engine(
     echo=settings.debug,
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
+    isolation_level="READ COMMITTED",
 )
 
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False)
