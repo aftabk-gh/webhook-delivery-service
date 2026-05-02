@@ -17,3 +17,13 @@ class EndpointCreateResponse(BaseModel):
     event_types: list[str]
     is_active: bool
     created_at: datetime
+
+
+class EndpointListResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    url: str
+    event_types: list[str]
+    is_active: bool
+    created_at: datetime

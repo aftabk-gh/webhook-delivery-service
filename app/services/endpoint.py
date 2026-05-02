@@ -5,7 +5,11 @@ from app.core.exceptions import ConflictError
 from app.core.logging import get_logger
 from app.models.endpoint import Endpoint
 from app.models.tenant import Tenant
-from app.queries.endpoint import add_endpoint, build_endpoint
+from app.queries.endpoint import (
+    add_endpoint,
+    build_endpoint,
+    list_active_endpoints_by_tenant,
+)
 from app.schemas.endpoint import EndpointCreate
 
 logger = get_logger(__name__)
@@ -39,3 +43,13 @@ async def create_endpoint(
         endpoint_id=str(endpoint.id),
     )
     return endpoint
+
+
+async def list_endpoints(
+    session: AsyncSession,
+    tenant: Tenant,
+) -> list[Endpoint]:
+    return await list_active_endpoints_by_tenant(
+        session=session,
+        tenant_id=tenant.id,
+    )
