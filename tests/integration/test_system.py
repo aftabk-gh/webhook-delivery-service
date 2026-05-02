@@ -4,12 +4,12 @@ import pytest
 from httpx import AsyncClient
 from redis.exceptions import RedisError
 
+from app.core.redis import redis_client
 from app.database import engine
 from app.main import (
     app as fastapi_app,
     lifespan,
 )
-from app.redis import redis_client
 
 
 async def test_health_returns_ok_when_redis_is_available(

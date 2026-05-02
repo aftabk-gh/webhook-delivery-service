@@ -41,6 +41,10 @@ async def test_get_current_tenant_returns_401_for_missing_api_key(
     response = await db_client.get("/tenants/me/")
 
     assert response.status_code == 401
+    assert response.json() == {
+        "error": "Missing API key.",
+        "code": "AUTHENTICATION_FAILED",
+    }
 
 
 async def test_get_current_tenant_returns_401_for_invalid_api_key(
@@ -49,6 +53,10 @@ async def test_get_current_tenant_returns_401_for_invalid_api_key(
     response = await db_client.get("/tenants/me/", headers={"X-API-Key": "invalid"})
 
     assert response.status_code == 401
+    assert response.json() == {
+        "error": "Invalid API key.",
+        "code": "AUTHENTICATION_FAILED",
+    }
 
 
 async def test_tenants_receive_distinct_api_keys_and_signing_secrets(
