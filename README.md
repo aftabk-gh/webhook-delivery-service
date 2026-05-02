@@ -20,3 +20,10 @@ Run the test suite:
 ```bash
 uv run pytest
 ```
+
+## Create & Apply Migrations
+
+```bash
+docker-compose exec api alembic revision --autogenerate -m "your message"
+docker-compose exec api alembic upgrade head
+```
