@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, status
+import uuid
+
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies.auth import get_current_tenant
@@ -8,8 +10,15 @@ from app.schemas.endpoint import (
     EndpointCreate,
     EndpointCreateResponse,
     EndpointListResponse,
+    EndpointUpdate,
+    EndpointUpdateResponse,
 )
-from app.services.endpoint import create_endpoint, list_endpoints
+from app.services.endpoint import (
+    create_endpoint,
+    delete_endpoint,
+    list_endpoints,
+    update_endpoint,
+)
 
 router = APIRouter(prefix="/endpoints", tags=["endpoints"])
 
@@ -39,3 +48,40 @@ async def create_endpoint_route(
 ) -> EndpointCreateResponse:
     endpoint = await create_endpoint(session=db, tenant=tenant, endpoint_in=payload)
     return EndpointCreateResponse.model_validate(endpoint)
+
+
+@router.patch(
+    "/{endpoint_id}/",
+    response_model=EndpointUpdateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def update_endpoint_route(
+    endpoint_id: uuid.UUID,
+    payload: EndpointUpdate,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> EndpointUpdateResponse:
+    endpoint = await update_endpoint(
+        session=db,
+        tenant=tenant,
+        endpoint_id=endpoint_id,
+        endpoint_in=payload,
+    )
+    return EndpointUpdateResponse.model_validate(endpoint)
+
+
+@router.delete(
+    "/{endpoint_id}/",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_endpoint_route(
+    endpoint_id: uuid.UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await delete_endpoint(
+        session=db,
+        tenant=tenant,
+        endpoint_id=endpoint_id,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

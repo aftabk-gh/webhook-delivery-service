@@ -19,3 +19,8 @@ class AuthenticationError(AppError):
 class ConflictError(AppError):
     def __init__(self, message: str, code: str = "CONFLICT") -> None:
         super().__init__(message=message, code=code, status_code=409)
+
+
+class NotFoundError(AppError):
+    def __init__(self, message: str, code: str = "NOT_FOUND") -> None:
+        super().__init__(message=message, code=code, status_code=404)

@@ -36,3 +36,18 @@ async def list_active_endpoints_by_tenant(
     )
     # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return list(result.scalars().all())
+
+
+async def get_active_endpoint_by_id_for_tenant(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    endpoint_id: uuid.UUID,
+) -> Endpoint | None:
+    result = await session.execute(
+        select(Endpoint).where(
+            Endpoint.id == endpoint_id,
+            Endpoint.tenant_id == tenant_id,
+            Endpoint.is_active.is_(True),
+        )
+    )
+    return result.scalar_one_or_none()
