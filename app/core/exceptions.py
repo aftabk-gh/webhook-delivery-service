@@ -16,6 +16,11 @@ class AuthenticationError(AppError):
         super().__init__(message=message, code=code, status_code=401)
 
 
+class BadRequestError(AppError):
+    def __init__(self, message: str, code: str = "BAD_REQUEST") -> None:
+        super().__init__(message=message, code=code, status_code=400)
+
+
 class ConflictError(AppError):
     def __init__(self, message: str, code: str = "CONFLICT") -> None:
         super().__init__(message=message, code=code, status_code=409)
@@ -24,3 +29,8 @@ class ConflictError(AppError):
 class NotFoundError(AppError):
     def __init__(self, message: str, code: str = "NOT_FOUND") -> None:
         super().__init__(message=message, code=code, status_code=404)
+
+
+class NotImplementedAppError(AppError):
+    def __init__(self, message: str, code: str = "NOT_IMPLEMENTED") -> None:
+        super().__init__(message=message, code=code, status_code=501)

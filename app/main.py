@@ -8,6 +8,7 @@ from redis.exceptions import RedisError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes.endpoints import router as endpoint_router
+from app.api.routes.events import router as event_router
 from app.api.routes.health import router as health_router
 from app.api.routes.tenants import router as tenant_router
 from app.core.exceptions import AppError
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(endpoint_router)
+app.include_router(event_router)
 app.include_router(health_router)
 app.include_router(tenant_router)
 
