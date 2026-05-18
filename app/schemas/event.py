@@ -20,6 +20,11 @@ class EventCreateResponse(BaseModel):
     id: uuid.UUID
 
 
+class EventIngestResponse(BaseModel):
+    id: uuid.UUID
+    created: bool
+
+
 class EventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

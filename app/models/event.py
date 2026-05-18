@@ -32,4 +32,4 @@ class Event(Base):
     event_type: Mapped[str] = mapped_column(String(255), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     idempotency_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
+    received_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
