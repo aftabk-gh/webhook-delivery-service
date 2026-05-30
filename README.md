@@ -28,7 +28,7 @@ FastAPI, PostgreSQL, Redis, Celery, Docker, pgvector, OpenAI embeddings.
 
 ## Current Step
 
-Currently working on: **Step 4**
+Currently working on: **Step 5**
 
 ## Run Tests
 
