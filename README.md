@@ -50,6 +50,26 @@ Run the test suite:
 uv run pytest
 ```
 
+## Seed Data
+
+Start the local Docker stack:
+
+```bash
+docker compose up -d
+```
+
+Seed local development data from inside the API container:
+
+```bash
+docker compose exec api python -m app.scripts.seed
+```
+
+Reset the database and seed fresh data:
+
+```bash
+docker compose exec api python -m app.scripts.seed --reset
+```
+
 ## Migrations
 
 ```bash
