@@ -1,7 +1,8 @@
-import asyncio
-
 from app.core.logging import configure_logging, get_logger
-from app.services.delivery import deliver_to_endpoint_once, fan_out_event_deliveries
+from app.services.delivery import (
+    deliver_to_endpoint_once,
+    fan_out_event_deliveries,
+)
 from app.tasks.worker import celery_app
 
 configure_logging()
@@ -20,12 +21,10 @@ def deliver_event(
         event_id=event_id,
         idempotency_key=idempotency_key,
     )
-    asyncio.run(
-        fan_out_event_deliveries(
-            event_id=event_id,
-            tenant_id=tenant_id,
-            dispatch_delivery=deliver_to_endpoint.apply_async,
-        )
+    fan_out_event_deliveries(
+        event_id=event_id,
+        tenant_id=tenant_id,
+        dispatch_delivery=deliver_to_endpoint.apply_async,
     )
 
 
@@ -37,4 +36,4 @@ def deliver_to_endpoint(delivery_id: str, tenant_id: str) -> None:
         delivery_id=delivery_id,
     )
 
-    asyncio.run(deliver_to_endpoint_once(delivery_id=delivery_id, tenant_id=tenant_id))
+    deliver_to_endpoint_once(delivery_id=delivery_id, tenant_id=tenant_id)

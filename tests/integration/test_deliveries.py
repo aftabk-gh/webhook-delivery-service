@@ -1,12 +1,15 @@
-"""Integration tests for delivery worker behavior."""
+"""Integration tests for Celery delivery behavior."""
 
+from collections.abc import Generator
 from typing import Any
 
-import httpx
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
+import requests
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import Engine, create_engine, func, select
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.database import Base
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
@@ -14,21 +17,60 @@ from app.models.tenant import Tenant
 from app.services import delivery as delivery_service
 
 
-def patch_delivery_session_factory(
+class DeliveryTestSettings(BaseSettings):
+    """Settings used by the sync worker integration tests."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    test_sync_database_url: str | None = None
+
+
+@pytest.fixture
+def sync_test_engine() -> Generator[Engine]:
+    database_url = DeliveryTestSettings().test_sync_database_url
+    if not database_url:
+        pytest.skip(
+            "TEST_SYNC_DATABASE_URL is required for sync DB-backed integration tests."
+        )
+
+    engine = create_engine(database_url)
+    try:
+        yield engine
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def sync_db_session(sync_test_engine: Engine) -> Generator[Session]:
+    Base.metadata.drop_all(bind=sync_test_engine)
+    Base.metadata.create_all(bind=sync_test_engine)
+
+    session_factory = sessionmaker(bind=sync_test_engine, expire_on_commit=False)
+    session = session_factory()
+
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()
+        Base.metadata.drop_all(bind=sync_test_engine)
+
+
+@pytest.fixture
+def patch_worker_session_factory(
     monkeypatch: pytest.MonkeyPatch,
-    test_engine: AsyncEngine,
+    sync_test_engine: Engine,
 ) -> None:
-    session_factory = async_sessionmaker(bind=test_engine, expire_on_commit=False)
-    monkeypatch.setattr(delivery_service, "AsyncSessionLocal", session_factory)
+    session_factory = sessionmaker(bind=sync_test_engine, expire_on_commit=False)
+    monkeypatch.setattr(delivery_service, "SessionLocal", session_factory)
 
 
-async def create_tenant_event_and_endpoints(
-    db_session: AsyncSession,
+def create_tenant_event_and_endpoints(
+    db_session: Session,
 ) -> tuple[Tenant, Event, Endpoint, Endpoint, Endpoint, Endpoint]:
     tenant = Tenant(name="Acme")
     other_tenant = Tenant(name="Globex")
     db_session.add_all([tenant, other_tenant])
-    await db_session.flush()
+    db_session.flush()
 
     event = Event(
         tenant_id=tenant.id,
@@ -69,7 +111,7 @@ async def create_tenant_event_and_endpoints(
             other_tenant_endpoint,
         ]
     )
-    await db_session.commit()
+    db_session.commit()
 
     return (
         tenant,
@@ -81,32 +123,28 @@ async def create_tenant_event_and_endpoints(
     )
 
 
-async def test_fan_out_event_deliveries_creates_delivery_for_matching_endpoint(
-    db_session: AsyncSession,
-    test_engine: AsyncEngine,
-    monkeypatch: pytest.MonkeyPatch,
+def test_fan_out_event_deliveries_creates_delivery_for_matching_endpoint(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
 ) -> None:
-    patch_delivery_session_factory(monkeypatch, test_engine)
-    tenant, event, matching_endpoint, *_ = await create_tenant_event_and_endpoints(
-        db_session
+    tenant, event, matching_endpoint, *_ = create_tenant_event_and_endpoints(
+        sync_db_session
     )
     dispatched_tasks: list[tuple[list[str], str]] = []
 
     def dispatch_delivery(*, args: list[str], queue: str) -> None:
         dispatched_tasks.append((args, queue))
 
-    await delivery_service.fan_out_event_deliveries(
+    delivery_service.fan_out_event_deliveries(
         event_id=str(event.id),
         tenant_id=str(tenant.id),
         dispatch_delivery=dispatch_delivery,
     )
 
-    delivery = (
-        await db_session.execute(
-            select(Delivery).where(
-                Delivery.tenant_id == tenant.id,
-                Delivery.event_id == event.id,
-            )
+    delivery = sync_db_session.execute(
+        select(Delivery).where(
+            Delivery.tenant_id == tenant.id,
+            Delivery.event_id == event.id,
         )
     ).scalar_one()
 
@@ -115,109 +153,99 @@ async def test_fan_out_event_deliveries_creates_delivery_for_matching_endpoint(
     assert dispatched_tasks == [([str(delivery.id), str(tenant.id)], "delivery")]
 
 
-async def test_fan_out_event_deliveries_ignores_inactive_non_matching_and_cross_tenant_endpoints(
-    db_session: AsyncSession,
-    test_engine: AsyncEngine,
-    monkeypatch: pytest.MonkeyPatch,
+def test_fan_out_event_deliveries_ignores_non_matching_and_cross_tenant_endpoints(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
 ) -> None:
-    patch_delivery_session_factory(monkeypatch, test_engine)
-    tenant, event, matching_endpoint, *_ = await create_tenant_event_and_endpoints(
-        db_session
+    tenant, event, matching_endpoint, *_ = create_tenant_event_and_endpoints(
+        sync_db_session
     )
 
-    await delivery_service.fan_out_event_deliveries(
+    delivery_service.fan_out_event_deliveries(
         event_id=str(event.id),
         tenant_id=str(tenant.id),
         dispatch_delivery=lambda **_: None,
     )
 
     deliveries = list(
-        (
-            await db_session.execute(
-                select(Delivery).where(
-                    Delivery.tenant_id == tenant.id,
-                    Delivery.event_id == event.id,
-                )
+        sync_db_session.execute(
+            select(Delivery).where(
+                Delivery.tenant_id == tenant.id,
+                Delivery.event_id == event.id,
             )
         )
         .scalars()
         .all()
     )
-    delivery_count = await db_session.scalar(select(func.count()).select_from(Delivery))
+    delivery_count = sync_db_session.scalar(select(func.count()).select_from(Delivery))
 
     assert delivery_count == 1
     assert [delivery.endpoint_id for delivery in deliveries] == [matching_endpoint.id]
 
 
-async def test_deliver_to_endpoint_once_marks_success_after_200_response(
-    db_session: AsyncSession,
-    test_engine: AsyncEngine,
+def test_deliver_to_endpoint_once_marks_success_after_200_response(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_delivery_session_factory(monkeypatch, test_engine)
-    tenant, event, endpoint, *_ = await create_tenant_event_and_endpoints(db_session)
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
     delivery = Delivery(
         tenant_id=tenant.id,
         event_id=event.id,
         endpoint_id=endpoint.id,
         status="pending",
     )
-    db_session.add(delivery)
-    await db_session.commit()
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
     delivery_id = delivery.id
-    endpoint_url = endpoint.url
-    event_payload = event.payload
-    event_id = event.id
-    event_type = event.event_type
 
     posted: dict[str, Any] = {}
     patch_http_client(monkeypatch, status_code=200, text="ok", posted=posted)
 
-    await delivery_service.deliver_to_endpoint_once(
+    delivery_service.deliver_to_endpoint_once(
         delivery_id=str(delivery_id),
         tenant_id=str(tenant.id),
     )
 
-    db_session.expire_all()
-    saved_delivery = await db_session.get(Delivery, delivery_id)
+    sync_db_session.expire_all()
+    saved_delivery = sync_db_session.get(Delivery, delivery_id)
 
     assert saved_delivery is not None
     assert saved_delivery.status == "success"
     assert saved_delivery.http_status_code == 200
     assert saved_delivery.response_body == "ok"
     assert saved_delivery.latency_ms is not None
-    assert posted["url"] == endpoint_url
-    assert posted["json"] == event_payload
-    assert posted["headers"]["X-Webhook-Event-ID"] == str(event_id)
-    assert posted["headers"]["X-Webhook-Event-Type"] == event_type
+    assert posted["url"] == endpoint.url
+    assert posted["json"] == event.payload
+    assert posted["headers"]["X-Webhook-Event-ID"] == str(event.id)
+    assert posted["headers"]["X-Webhook-Event-Type"] == event.event_type
 
 
-async def test_deliver_to_endpoint_once_marks_failed_after_500_response(
-    db_session: AsyncSession,
-    test_engine: AsyncEngine,
+def test_deliver_to_endpoint_once_marks_failed_after_500_response(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    patch_delivery_session_factory(monkeypatch, test_engine)
-    tenant, event, endpoint, *_ = await create_tenant_event_and_endpoints(db_session)
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
     delivery = Delivery(
         tenant_id=tenant.id,
         event_id=event.id,
         endpoint_id=endpoint.id,
         status="pending",
     )
-    db_session.add(delivery)
-    await db_session.commit()
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
     delivery_id = delivery.id
 
     patch_http_client(monkeypatch, status_code=500, text="server error")
 
-    await delivery_service.deliver_to_endpoint_once(
+    delivery_service.deliver_to_endpoint_once(
         delivery_id=str(delivery_id),
         tenant_id=str(tenant.id),
     )
 
-    db_session.expire_all()
-    saved_delivery = await db_session.get(Delivery, delivery_id)
+    sync_db_session.expire_all()
+    saved_delivery = sync_db_session.get(Delivery, delivery_id)
 
     assert saved_delivery is not None
     assert saved_delivery.status == "failed"
@@ -237,24 +265,26 @@ def patch_http_client(
             self.status_code = status_code
             self.text = text
 
-    class FakeAsyncClient:
-        def __init__(self, timeout: float) -> None:
-            self.timeout = timeout
+    class FakeClient:
+        def __init__(self) -> None:
+            self.timeout: float | None = None
 
-        async def __aenter__(self) -> "FakeAsyncClient":
+        def __enter__(self) -> "FakeClient":
             return self
 
-        async def __aexit__(self, *_: object) -> None:
+        def __exit__(self, *_: object) -> None:
             return None
 
-        async def post(
+        def post(
             self,
             url: str,
             json: dict[str, Any],
             headers: dict[str, str],
+            timeout: float,
         ) -> FakeResponse:
+            self.timeout = timeout
             if posted is not None:
                 posted.update({"url": url, "json": json, "headers": headers})
             return FakeResponse()
 
-    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(requests, "Session", FakeClient)

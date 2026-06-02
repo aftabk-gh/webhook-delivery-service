@@ -1,44 +1,46 @@
 import uuid
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
 
 
-async def get_event_for_tenant(
-    session: AsyncSession,
+def get_event_for_tenant(
+    session: Session,
     event_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Event | None:
-    result = await session.execute(
+    result = session.execute(
         select(Event).where(
             Event.id == event_id,
             Event.tenant_id == tenant_id,
         )
     )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return result.scalar_one_or_none()
 
 
-async def list_active_matching_endpoints_for_tenant(
-    session: AsyncSession,
+def list_active_matching_endpoints_for_tenant(
+    session: Session,
     tenant_id: uuid.UUID,
     event_type: str,
 ) -> list[Endpoint]:
-    result = await session.execute(
+    result = session.execute(
         select(Endpoint).where(
             Endpoint.tenant_id == tenant_id,
             Endpoint.is_active.is_(True),
             Endpoint.event_types.contains([event_type]),
         )
     )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return list(result.scalars().all())
 
 
 def add_delivery(
-    session: AsyncSession,
+    session: Session,
     event_id: uuid.UUID,
     endpoint_id: uuid.UUID,
     tenant_id: uuid.UUID,
@@ -52,33 +54,35 @@ def add_delivery(
     return delivery
 
 
-async def get_pending_delivery_for_update(
-    session: AsyncSession,
+def get_pending_delivery_for_update(
+    session: Session,
     delivery_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Delivery | None:
-    result = await session.execute(
+    result = session.execute(
         select(Delivery)
         .where(
             Delivery.id == delivery_id,
             Delivery.tenant_id == tenant_id,
             Delivery.status == "pending",
         )
-        .with_for_update(skip_locked=True)
+        .with_for_update()
     )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return result.scalar_one_or_none()
 
 
-async def get_active_endpoint_for_tenant(
-    session: AsyncSession,
+def get_active_endpoint_for_tenant(
+    session: Session,
     endpoint_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Endpoint | None:
-    result = await session.execute(
+    result = session.execute(
         select(Endpoint).where(
             Endpoint.id == endpoint_id,
             Endpoint.is_active.is_(True),
             Endpoint.tenant_id == tenant_id,
         )
     )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return result.scalar_one_or_none()

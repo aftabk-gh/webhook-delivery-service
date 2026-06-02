@@ -3,10 +3,10 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-import httpx
+import requests
 
 from app.core.logging import get_logger
-from app.database import AsyncSessionLocal
+from app.database import SessionLocal
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 TaskDispatcher = Callable[..., Any]
 
 
-async def fan_out_event_deliveries(
+def fan_out_event_deliveries(
     event_id: str,
     tenant_id: str,
     dispatch_delivery: TaskDispatcher,
@@ -31,8 +31,8 @@ async def fan_out_event_deliveries(
     parsed_event_id = uuid.UUID(event_id)
     parsed_tenant_id = uuid.UUID(tenant_id)
 
-    async with AsyncSessionLocal() as session:
-        event = await get_event_for_tenant(
+    with SessionLocal() as session:
+        event = get_event_for_tenant(
             session=session,
             event_id=parsed_event_id,
             tenant_id=parsed_tenant_id,
@@ -45,7 +45,7 @@ async def fan_out_event_deliveries(
             )
             return
 
-        endpoints = await list_active_matching_endpoints_for_tenant(
+        endpoints = list_active_matching_endpoints_for_tenant(
             session=session,
             tenant_id=parsed_tenant_id,
             event_type=event.event_type,
@@ -61,18 +61,18 @@ async def fan_out_event_deliveries(
             )
             deliveries.append(delivery)
 
-        await session.commit()
+        session.commit()
 
     for delivery in deliveries:
         dispatch_delivery(args=[str(delivery.id), tenant_id], queue="delivery")
 
 
-async def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
+def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
     parsed_delivery_id = uuid.UUID(delivery_id)
     parsed_tenant_id = uuid.UUID(tenant_id)
 
-    async with AsyncSessionLocal() as session:
-        delivery = await get_pending_delivery_for_update(
+    with SessionLocal() as session:
+        delivery = get_pending_delivery_for_update(
             session=session,
             delivery_id=parsed_delivery_id,
             tenant_id=parsed_tenant_id,
@@ -85,12 +85,12 @@ async def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
             )
             return
 
-        endpoint = await get_active_endpoint_for_tenant(
+        endpoint = get_active_endpoint_for_tenant(
             session=session,
             endpoint_id=delivery.endpoint_id,
             tenant_id=parsed_tenant_id,
         )
-        event = await get_event_for_tenant(
+        event = get_event_for_tenant(
             session=session,
             event_id=delivery.event_id,
             tenant_id=parsed_tenant_id,
@@ -98,7 +98,7 @@ async def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
         if endpoint is None or event is None:
             delivery.status = "failed"
             delivery.response_body = "Endpoint or event not found"
-            await session.commit()
+            session.commit()
             logger.warning(
                 "endpoint_delivery_missing_related_record",
                 tenant_id=tenant_id,
@@ -108,17 +108,17 @@ async def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
             )
             return
 
-        await _post_and_record_delivery(
+        _post_and_record_delivery(
             delivery=delivery,
             endpoint=endpoint,
             event=event,
             tenant_id=tenant_id,
             delivery_id=delivery_id,
         )
-        await session.commit()
+        session.commit()
 
 
-async def _post_and_record_delivery(
+def _post_and_record_delivery(
     delivery: Delivery,
     endpoint: Endpoint,
     event: Event,
@@ -133,17 +133,18 @@ async def _post_and_record_delivery(
     started_at = time.perf_counter()
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
+        with requests.Session() as client:
+            response = client.post(
                 endpoint.url,
                 json=event.payload,
                 headers=headers,
+                timeout=10.0,
             )
 
         delivery.http_status_code = response.status_code
         delivery.response_body = response.text[:500]
         delivery.status = "success" if 200 <= response.status_code <= 299 else "failed"
-    except httpx.HTTPError as exc:
+    except requests.RequestException as exc:
         delivery.status = "failed"
         delivery.http_status_code = None
         delivery.response_body = str(exc)[:500]
