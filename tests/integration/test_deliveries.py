@@ -14,6 +14,7 @@ from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
 from app.models.tenant import Tenant
+from app.queries.delivery import get_pending_delivery_for_update
 from app.services import delivery as delivery_service
 
 
@@ -254,6 +255,113 @@ def test_deliver_to_endpoint_once_marks_failed_after_500_response(
     assert saved_delivery.latency_ms is not None
 
 
+def test_deliver_to_endpoint_once_marks_failed_after_timeout(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
+    delivery = Delivery(
+        tenant_id=tenant.id,
+        event_id=event.id,
+        endpoint_id=endpoint.id,
+        status="pending",
+    )
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
+    delivery_id = delivery.id
+
+    patch_http_client_exception(monkeypatch, requests.Timeout("request timed out"))
+
+    delivery_service.deliver_to_endpoint_once(
+        delivery_id=str(delivery_id),
+        tenant_id=str(tenant.id),
+    )
+
+    sync_db_session.expire_all()
+    saved_delivery = sync_db_session.get(Delivery, delivery_id)
+
+    assert saved_delivery is not None
+    assert saved_delivery.status == "failed"
+    assert saved_delivery.http_status_code is None
+    assert saved_delivery.response_body == "request timed out"
+    assert saved_delivery.latency_ms is not None
+
+
+def test_deliver_to_endpoint_once_marks_failed_after_connection_error(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
+    delivery = Delivery(
+        tenant_id=tenant.id,
+        event_id=event.id,
+        endpoint_id=endpoint.id,
+        status="pending",
+    )
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
+    delivery_id = delivery.id
+
+    patch_http_client_exception(
+        monkeypatch, requests.ConnectionError("connection failed")
+    )
+
+    delivery_service.deliver_to_endpoint_once(
+        delivery_id=str(delivery_id),
+        tenant_id=str(tenant.id),
+    )
+
+    sync_db_session.expire_all()
+    saved_delivery = sync_db_session.get(Delivery, delivery_id)
+
+    assert saved_delivery is not None
+    assert saved_delivery.status == "failed"
+    assert saved_delivery.http_status_code is None
+    assert saved_delivery.response_body == "connection failed"
+    assert saved_delivery.latency_ms is not None
+
+
+def test_get_pending_delivery_for_update_skips_locked_delivery(
+    sync_db_session: Session,
+    sync_test_engine: Engine,
+) -> None:
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
+    delivery = Delivery(
+        tenant_id=tenant.id,
+        event_id=event.id,
+        endpoint_id=endpoint.id,
+        status="pending",
+    )
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
+
+    session_factory = sessionmaker(bind=sync_test_engine, expire_on_commit=False)
+    first_worker_session = session_factory()
+    second_worker_session = session_factory()
+
+    try:
+        first_worker_delivery = get_pending_delivery_for_update(
+            session=first_worker_session,
+            delivery_id=delivery.id,
+            tenant_id=tenant.id,
+        )
+        second_worker_delivery = get_pending_delivery_for_update(
+            session=second_worker_session,
+            delivery_id=delivery.id,
+            tenant_id=tenant.id,
+        )
+
+        assert first_worker_delivery is not None
+        assert second_worker_delivery is None
+    finally:
+        first_worker_session.rollback()
+        second_worker_session.rollback()
+        first_worker_session.close()
+        second_worker_session.close()
+
+
 def patch_http_client(
     monkeypatch: pytest.MonkeyPatch,
     status_code: int,
@@ -286,5 +394,28 @@ def patch_http_client(
             if posted is not None:
                 posted.update({"url": url, "json": json, "headers": headers})
             return FakeResponse()
+
+    monkeypatch.setattr(requests, "Session", FakeClient)
+
+
+def patch_http_client_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    exception: requests.RequestException,
+) -> None:
+    class FakeClient:
+        def __enter__(self) -> "FakeClient":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def post(
+            self,
+            url: str,
+            json: dict[str, Any],
+            headers: dict[str, str],
+            timeout: float,
+        ) -> object:
+            raise exception
 
     monkeypatch.setattr(requests, "Session", FakeClient)

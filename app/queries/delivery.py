@@ -66,7 +66,7 @@ def get_pending_delivery_for_update(
             Delivery.tenant_id == tenant_id,
             Delivery.status == "pending",
         )
-        .with_for_update()
+        .with_for_update(skip_locked=True)
     )
     # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return result.scalar_one_or_none()
