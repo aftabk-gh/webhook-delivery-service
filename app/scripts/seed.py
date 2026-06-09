@@ -17,12 +17,10 @@ class SeedTenant(TypedDict):
     endpoints: list[SeedEndpoint]
 
 
-# replace below urls with original ones from https://webhook.site/
-
 WEBHOOK_URLS = [
-    "https://webhook.site/2fd8a7d3-8e19-4991-8332-0b643ad70c91",
-    "https://webhook.site/97fb8ddf-634c-47bf-9ff1-417b061cf6f3",
-    "https://webhook.site/7339ed21-5feb-4c51-8727-3d54413fdbf2",
+    "http://test-receiver:9000/webhook",
+    "http://test-receiver:9000/webhook",
+    "http://test-receiver:9000/webhook",
 ]
 
 TENANTS: list[SeedTenant] = [

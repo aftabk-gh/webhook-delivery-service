@@ -48,5 +48,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+  test-receiver:
+    build: ./test-receiver
+    volumes:
+      - ./test-receiver/main.py:/app/main.py
+    ports:
+      - "9000:9000"
 volumes:
   postgres_data:
