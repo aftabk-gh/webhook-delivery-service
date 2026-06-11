@@ -1,6 +1,7 @@
 import time
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
@@ -21,6 +22,7 @@ from app.queries.delivery import (
 logger = get_logger(__name__)
 
 TaskDispatcher = Callable[..., Any]
+RETRY_DELAYS_SECONDS = [30, 120, 600]
 
 
 def fan_out_event_deliveries(
@@ -131,6 +133,7 @@ def _post_and_record_delivery(
         "X-Webhook-Event-Type": event.event_type,
     }
     started_at = time.perf_counter()
+    delivery.attempt_number += 1
 
     try:
         with requests.Session() as client:
@@ -158,6 +161,34 @@ def _post_and_record_delivery(
         )
 
     delivery.latency_ms = int((time.perf_counter() - started_at) * 1000)
+    if delivery.status == "failed":
+        retry_index = delivery.attempt_number - 1
+        if retry_index < len(RETRY_DELAYS_SECONDS):
+            delay = RETRY_DELAYS_SECONDS[retry_index]
+            delivery.status = "pending"
+            delivery.next_retry_at = _utcnow() + timedelta(seconds=delay)
+            from app.tasks.events import deliver_to_endpoint
+
+            deliver_to_endpoint.apply_async(
+                args=[str(delivery.id), tenant_id],
+                queue="delivery",
+                countdown=delay,
+            )
+            logger.info(
+                "retry_scheduled",
+                tenant_id=tenant_id,
+                delivery_id=delivery_id,
+                endpoint_id=str(endpoint.id),
+                event_id=str(event.id),
+                attempt_number=delivery.attempt_number,
+                next_retry_at=delivery.next_retry_at.isoformat(),
+            )
+        else:
+            delivery.status = "exhausted"
+            delivery.next_retry_at = None
+    else:
+        delivery.next_retry_at = None
+
     logger.info(
         "endpoint_delivery_attempted",
         tenant_id=tenant_id,
@@ -167,4 +198,9 @@ def _post_and_record_delivery(
         http_status_code=delivery.http_status_code,
         latency_ms=delivery.latency_ms,
         status=delivery.status,
+        attempt_number=delivery.attempt_number,
     )
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)

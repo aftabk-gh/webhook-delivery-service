@@ -1,6 +1,7 @@
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.models.delivery import Delivery
@@ -59,12 +60,17 @@ def get_pending_delivery_for_update(
     delivery_id: uuid.UUID,
     tenant_id: uuid.UUID,
 ) -> Delivery | None:
+    now = datetime.now(UTC).replace(tzinfo=None)
     result = session.execute(
         select(Delivery)
         .where(
             Delivery.id == delivery_id,
             Delivery.tenant_id == tenant_id,
             Delivery.status == "pending",
+            or_(
+                Delivery.next_retry_at.is_(None),
+                Delivery.next_retry_at <= now,
+            ),
         )
         .with_for_update(skip_locked=True)
     )

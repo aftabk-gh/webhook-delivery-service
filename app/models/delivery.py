@@ -43,6 +43,7 @@ class Delivery(Base):
         default=0,
         server_default="0",
     )
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     http_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     response_body: Mapped[str | None] = mapped_column(String(500), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
