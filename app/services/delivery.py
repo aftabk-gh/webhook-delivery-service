@@ -70,7 +70,16 @@ def fan_out_event_deliveries(
         dispatch_delivery(args=[str(delivery.id), tenant_id], queue="delivery")
 
 
-def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
+def deliver_to_endpoint_once(
+    delivery_id: str,
+    tenant_id: str,
+    dispatch_delivery: TaskDispatcher | None = None,
+) -> None:
+    if dispatch_delivery is None:
+        from app.tasks.events import deliver_to_endpoint
+
+        dispatch_delivery = deliver_to_endpoint.apply_async
+
     parsed_delivery_id = uuid.UUID(delivery_id)
     parsed_tenant_id = uuid.UUID(tenant_id)
 
@@ -117,6 +126,7 @@ def deliver_to_endpoint_once(delivery_id: str, tenant_id: str) -> None:
             event=event,
             tenant_id=tenant_id,
             delivery_id=delivery_id,
+            dispatch_delivery=dispatch_delivery,
         )
         session.commit()
 
@@ -127,6 +137,7 @@ def _post_and_record_delivery(
     event: Event,
     tenant_id: str,
     delivery_id: str,
+    dispatch_delivery: TaskDispatcher,
 ) -> None:
     headers = {
         "Content-Type": "application/json",
@@ -168,9 +179,7 @@ def _post_and_record_delivery(
             delay = RETRY_DELAYS_SECONDS[retry_index]
             delivery.status = "pending"
             delivery.next_retry_at = _utcnow() + timedelta(seconds=delay)
-            from app.tasks.events import deliver_to_endpoint
-
-            deliver_to_endpoint.apply_async(
+            dispatch_delivery(
                 args=[str(delivery.id), tenant_id],
                 queue="delivery",
                 countdown=delay,

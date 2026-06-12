@@ -222,7 +222,7 @@ def test_deliver_to_endpoint_once_marks_success_after_200_response(
     assert posted["headers"]["X-Webhook-Event-Type"] == event.event_type
 
 
-def test_deliver_to_endpoint_once_marks_failed_after_500_response(
+def test_deliver_to_endpoint_once_schedules_retry_after_500_response(
     sync_db_session: Session,
     patch_worker_session_factory: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -239,23 +239,34 @@ def test_deliver_to_endpoint_once_marks_failed_after_500_response(
     delivery_id = delivery.id
 
     patch_http_client(monkeypatch, status_code=500, text="server error")
+    dispatched_tasks: list[dict[str, Any]] = []
 
     delivery_service.deliver_to_endpoint_once(
         delivery_id=str(delivery_id),
         tenant_id=str(tenant.id),
+        dispatch_delivery=lambda **kwargs: dispatched_tasks.append(kwargs),
     )
 
     sync_db_session.expire_all()
     saved_delivery = sync_db_session.get(Delivery, delivery_id)
 
     assert saved_delivery is not None
-    assert saved_delivery.status == "failed"
+    assert saved_delivery.status == "pending"
+    assert saved_delivery.attempt_number == 1
+    assert saved_delivery.next_retry_at is not None
     assert saved_delivery.http_status_code == 500
     assert saved_delivery.response_body == "server error"
     assert saved_delivery.latency_ms is not None
+    assert dispatched_tasks == [
+        {
+            "args": [str(delivery_id), str(tenant.id)],
+            "queue": "delivery",
+            "countdown": 30,
+        }
+    ]
 
 
-def test_deliver_to_endpoint_once_marks_failed_after_timeout(
+def test_deliver_to_endpoint_once_schedules_retry_after_timeout(
     sync_db_session: Session,
     patch_worker_session_factory: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -272,23 +283,34 @@ def test_deliver_to_endpoint_once_marks_failed_after_timeout(
     delivery_id = delivery.id
 
     patch_http_client_exception(monkeypatch, requests.Timeout("request timed out"))
+    dispatched_tasks: list[dict[str, Any]] = []
 
     delivery_service.deliver_to_endpoint_once(
         delivery_id=str(delivery_id),
         tenant_id=str(tenant.id),
+        dispatch_delivery=lambda **kwargs: dispatched_tasks.append(kwargs),
     )
 
     sync_db_session.expire_all()
     saved_delivery = sync_db_session.get(Delivery, delivery_id)
 
     assert saved_delivery is not None
-    assert saved_delivery.status == "failed"
+    assert saved_delivery.status == "pending"
+    assert saved_delivery.attempt_number == 1
+    assert saved_delivery.next_retry_at is not None
     assert saved_delivery.http_status_code is None
     assert saved_delivery.response_body == "request timed out"
     assert saved_delivery.latency_ms is not None
+    assert dispatched_tasks == [
+        {
+            "args": [str(delivery_id), str(tenant.id)],
+            "queue": "delivery",
+            "countdown": 30,
+        }
+    ]
 
 
-def test_deliver_to_endpoint_once_marks_failed_after_connection_error(
+def test_deliver_to_endpoint_once_schedules_retry_after_connection_error(
     sync_db_session: Session,
     patch_worker_session_factory: None,
     monkeypatch: pytest.MonkeyPatch,
@@ -307,20 +329,31 @@ def test_deliver_to_endpoint_once_marks_failed_after_connection_error(
     patch_http_client_exception(
         monkeypatch, requests.ConnectionError("connection failed")
     )
+    dispatched_tasks: list[dict[str, Any]] = []
 
     delivery_service.deliver_to_endpoint_once(
         delivery_id=str(delivery_id),
         tenant_id=str(tenant.id),
+        dispatch_delivery=lambda **kwargs: dispatched_tasks.append(kwargs),
     )
 
     sync_db_session.expire_all()
     saved_delivery = sync_db_session.get(Delivery, delivery_id)
 
     assert saved_delivery is not None
-    assert saved_delivery.status == "failed"
+    assert saved_delivery.status == "pending"
+    assert saved_delivery.attempt_number == 1
+    assert saved_delivery.next_retry_at is not None
     assert saved_delivery.http_status_code is None
     assert saved_delivery.response_body == "connection failed"
     assert saved_delivery.latency_ms is not None
+    assert dispatched_tasks == [
+        {
+            "args": [str(delivery_id), str(tenant.id)],
+            "queue": "delivery",
+            "countdown": 30,
+        }
+    ]
 
 
 def test_get_pending_delivery_for_update_skips_locked_delivery(
