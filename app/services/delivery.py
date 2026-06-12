@@ -17,6 +17,7 @@ from app.queries.delivery import (
     get_event_for_tenant,
     get_pending_delivery_for_update,
     list_active_matching_endpoints_for_tenant,
+    list_due_pending_deliveries,
 )
 
 logger = get_logger(__name__)
@@ -204,3 +205,33 @@ def _post_and_record_delivery(
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def send_stuck_deliveries(
+    dispatch_delivery: TaskDispatcher | None = None,
+    batch_size: int = 1000,
+) -> int:
+    if dispatch_delivery is None:
+        from app.tasks.events import deliver_to_endpoint
+
+        dispatch_delivery = deliver_to_endpoint.apply_async
+
+    with SessionLocal() as session:
+        stuck_deliveries = list_due_pending_deliveries(
+            session=session,
+            now=_utcnow(),
+            limit=batch_size,
+        )
+
+        for delivery in stuck_deliveries:
+            dispatch_delivery(
+                args=[str(delivery.id), str(delivery.tenant_id)],
+                queue="delivery",
+            )
+            logger.info(
+                "stuck_delivery_requeued",
+                tenant_id=str(delivery.tenant_id),
+                delivery_id=str(delivery.id),
+            )
+
+    return len(stuck_deliveries)

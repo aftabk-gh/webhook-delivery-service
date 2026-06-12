@@ -78,6 +78,27 @@ def get_pending_delivery_for_update(
     return result.scalar_one_or_none()
 
 
+def list_due_pending_deliveries(
+    session: Session,
+    now: datetime,
+    limit: int,
+) -> list[Delivery]:
+    # This is an intentional cross-tenant maintenance query.
+    # The recovery poller re-enqueues due pending deliveries across all tenants.
+    result = session.execute(
+        select(Delivery)
+        .where(
+            Delivery.status == "pending",
+            Delivery.next_retry_at.is_not(None),
+            Delivery.next_retry_at <= now,
+        )
+        .order_by(Delivery.next_retry_at.asc())
+        .limit(limit)
+    )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
+    return list(result.scalars().all())
+
+
 def get_active_endpoint_for_tenant(
     session: Session,
     endpoint_id: uuid.UUID,

@@ -2,6 +2,7 @@ from app.core.logging import configure_logging, get_logger
 from app.services.delivery import (
     deliver_to_endpoint_once,
     fan_out_event_deliveries,
+    send_stuck_deliveries,
 )
 from app.tasks.worker import celery_app
 
@@ -37,3 +38,16 @@ def deliver_to_endpoint(delivery_id: str, tenant_id: str) -> None:
     )
 
     deliver_to_endpoint_once(delivery_id=delivery_id, tenant_id=tenant_id)
+
+
+@celery_app.task(
+    name="events.recover_stuck_deliveries", queue="default", acks_late=True
+)  # type: ignore[untyped-decorator]
+def recover_stuck_deliveries() -> None:
+    logger.info("stuck_delivery_recovery_started", tenant_id="system")
+    recovered_count = send_stuck_deliveries()
+    logger.info(
+        "stuck_delivery_recovery_finished",
+        tenant_id="system",
+        recovered_count=recovered_count,
+    )
