@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
+from app.models.tenant import Tenant
 
 
 def get_event_for_tenant(
@@ -21,6 +22,14 @@ def get_event_for_tenant(
         )
     )
     # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
+    return result.scalar_one_or_none()
+
+
+def get_tenant_by_id(
+    session: Session,
+    tenant_id: uuid.UUID,
+) -> Tenant | None:
+    result = session.execute(select(Tenant).where(Tenant.id == tenant_id))
     return result.scalar_one_or_none()
 
 

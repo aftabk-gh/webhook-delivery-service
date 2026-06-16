@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import time
 import uuid
 from collections.abc import Callable
@@ -16,6 +19,7 @@ from app.queries.delivery import (
     get_active_endpoint_for_tenant,
     get_event_for_tenant,
     get_pending_delivery_for_update,
+    get_tenant_by_id,
     list_active_matching_endpoints_for_tenant,
     list_due_pending_deliveries,
 )
@@ -120,10 +124,25 @@ def deliver_to_endpoint_once(
             )
             return
 
+        tenant = get_tenant_by_id(session=session, tenant_id=parsed_tenant_id)
+        if tenant is None:
+            delivery.status = "failed"
+            delivery.response_body = "Tenant not found"
+            session.commit()
+            logger.warning(
+                "endpoint_delivery_missing_tenant",
+                tenant_id=tenant_id,
+                delivery_id=delivery_id,
+                endpoint_id=str(endpoint.id),
+                event_id=str(event.id),
+            )
+            return
+
         _post_and_record_delivery(
             delivery=delivery,
             endpoint=endpoint,
             event=event,
+            signing_secret=tenant.signing_secret,
             tenant_id=tenant_id,
             delivery_id=delivery_id,
             dispatch_delivery=dispatch_delivery,
@@ -135,23 +154,32 @@ def _post_and_record_delivery(
     delivery: Delivery,
     endpoint: Endpoint,
     event: Event,
+    signing_secret: str,
     tenant_id: str,
     delivery_id: str,
     dispatch_delivery: TaskDispatcher,
 ) -> None:
+    started_at = time.perf_counter()
+    delivery.attempt_number += 1
+
+    payload_bytes = json.dumps(
+        event.payload, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
+    signature = hmac.new(
+        signing_secret.encode(), payload_bytes, hashlib.sha256
+    ).hexdigest()
     headers = {
         "Content-Type": "application/json",
         "X-Webhook-Event-ID": str(event.id),
         "X-Webhook-Event-Type": event.event_type,
+        "X-Webhook-Signature": f"sha256={signature}",
     }
-    started_at = time.perf_counter()
-    delivery.attempt_number += 1
 
     try:
         with requests.Session() as client:
             response = client.post(
                 endpoint.url,
-                json=event.payload,
+                data=payload_bytes,
                 headers=headers,
                 timeout=10.0,
             )
