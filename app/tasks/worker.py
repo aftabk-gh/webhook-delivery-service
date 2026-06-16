@@ -19,7 +19,7 @@ celery_app.conf.update(
     beat_schedule={
         "recover-stuck-deliveries-hourly": {
             "task": "events.recover_stuck_deliveries",
-            "schedule": 3600.0,
+            "schedule": 300.0,
             "options": {"queue": "default"},
         },
     },
