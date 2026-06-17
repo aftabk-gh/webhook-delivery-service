@@ -16,16 +16,30 @@ async def list_deliveries_by_tenant(
     tenant_id: uuid.UUID,
     status: str | None = None,
     endpoint_id: uuid.UUID | None = None,
+    cursor_created_at: datetime | None = None,
+    cursor_id: uuid.UUID | None = None,
+    limit: int = 50,
 ) -> list[Delivery]:
     filters = [Delivery.tenant_id == tenant_id]
     if status is not None:
         filters.append(Delivery.status == status)
     if endpoint_id is not None:
         filters.append(Delivery.endpoint_id == endpoint_id)
+    if cursor_created_at is not None and cursor_id is not None:
+        filters.append(
+            or_(
+                Delivery.created_at < cursor_created_at,
+                (Delivery.created_at == cursor_created_at) & (Delivery.id < cursor_id),
+            )
+        )
 
     result = await session.execute(
-        select(Delivery).where(*filters).order_by(Delivery.created_at.desc())
+        select(Delivery)
+        .where(*filters)
+        .order_by(Delivery.created_at.desc(), Delivery.id.desc())
+        .limit(limit)
     )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
     return list(result.scalars().all())
 
 

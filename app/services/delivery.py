@@ -1,15 +1,18 @@
+import base64
 import hashlib
 import hmac
 import json
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import BadRequestError
 from app.core.logging import get_logger
 from app.database import SessionLocal
 from app.models.delivery import Delivery
@@ -31,6 +34,14 @@ logger = get_logger(__name__)
 
 TaskDispatcher = Callable[..., Any]
 RETRY_DELAYS_SECONDS = [30, 120, 600]
+DEFAULT_DELIVERY_LOG_LIMIT = 50
+MAX_DELIVERY_LOG_LIMIT = 100
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryLogPage:
+    items: list[Delivery]
+    next_cursor: str | None
 
 
 async def list_delivery_logs(
@@ -38,13 +49,53 @@ async def list_delivery_logs(
     tenant: Tenant,
     status: str | None = None,
     endpoint_id: uuid.UUID | None = None,
-) -> list[Delivery]:
-    return await list_deliveries_by_tenant(
+    cursor: str | None = None,
+    limit: int = DEFAULT_DELIVERY_LOG_LIMIT,
+) -> DeliveryLogPage:
+    cursor_created_at, cursor_id = _decode_delivery_cursor(cursor)
+    page_size = min(limit, MAX_DELIVERY_LOG_LIMIT)
+    deliveries = await list_deliveries_by_tenant(
         session=session,
         tenant_id=tenant.id,
         status=status,
         endpoint_id=endpoint_id,
+        cursor_created_at=cursor_created_at,
+        cursor_id=cursor_id,
+        limit=page_size + 1,
     )
+    page_items = deliveries[:page_size]
+    next_cursor = None
+    if len(deliveries) > page_size and page_items:
+        next_cursor = _encode_delivery_cursor(page_items[-1])
+
+    return DeliveryLogPage(items=page_items, next_cursor=next_cursor)
+
+
+def _decode_delivery_cursor(
+    cursor: str | None,
+) -> tuple[datetime | None, uuid.UUID | None]:
+    if cursor is None:
+        return None, None
+
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode()).decode()
+        payload = json.loads(decoded)
+        created_at = datetime.fromisoformat(payload["created_at"])
+        delivery_id = uuid.UUID(payload["id"])
+    except (KeyError, ValueError, json.JSONDecodeError) as exc:
+        raise BadRequestError(
+            "Invalid delivery cursor.", code="INVALID_CURSOR"
+        ) from exc
+
+    return created_at, delivery_id
+
+
+def _encode_delivery_cursor(delivery: Delivery) -> str:
+    payload = {
+        "created_at": delivery.created_at.isoformat(),
+        "id": str(delivery.id),
+    }
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
 
 
 def fan_out_event_deliveries(

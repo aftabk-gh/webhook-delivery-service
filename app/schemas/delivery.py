@@ -17,3 +17,8 @@ class DeliveryListResponse(BaseModel):
     latency_ms: int | None
     created_at: datetime
     updated_at: datetime
+
+
+class DeliveryListPageResponse(BaseModel):
+    items: list[DeliveryListResponse]
+    next_cursor: str | None
