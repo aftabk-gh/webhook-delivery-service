@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 app = FastAPI(title="Webhook Test Receiver")
@@ -44,8 +44,17 @@ async def receive_webhook(request: Request) -> Response:
     except Exception:
         body_json = None
 
+    webhook_id = len(received_webhooks) + 1
+    response_status_code = config["status_code"]
+    response_body: Any = {
+        "received": True,
+        "message": "Webhook accepted by test receiver",
+        "webhook_id": webhook_id,
+    }
+    response_headers = {"content-type": "application/json"}
+
     entry: dict[str, Any] = {
-        "id": len(received_webhooks) + 1,
+        "id": webhook_id,
         "received_at": datetime.now(UTC).isoformat(),
         "headers": dict(request.headers),
         "body": body_json
@@ -53,27 +62,60 @@ async def receive_webhook(request: Request) -> Response:
         else body_bytes.decode("utf-8", errors="replace"),
         "size_bytes": len(body_bytes),
     }
-    received_webhooks.appendleft(entry)
 
     if config["timeout_mode"]:
+        outgoing_response = Response(status_code=200)
+        entry["response"] = {
+            "status_code": outgoing_response.status_code,
+            "headers": dict(outgoing_response.headers),
+            "body": "",
+        }
+        received_webhooks.appendleft(entry)
         await asyncio.sleep(60)
-        return Response(status_code=200)
-
-    if config["delay_seconds"] > 0:
-        await asyncio.sleep(config["delay_seconds"])
+        return outgoing_response
 
     if config["fail_next_n"] > 0:
         config["fail_count"] += 1
         if config["fail_count"] <= config["fail_next_n"]:
-            return Response(
-                content=f"Simulated failure ({config['fail_count']}/{config['fail_next_n']})",
-                status_code=500,
+            response_status_code = 500
+            response_body = (
+                f"Simulated failure ({config['fail_count']}/{config['fail_next_n']})"
             )
+            response_headers = {"content-type": "text/plain; charset=utf-8"}
+            outgoing_response = Response(
+                content=response_body,
+                status_code=response_status_code,
+                media_type="text/plain",
+            )
+            entry["response"] = {
+                "status_code": outgoing_response.status_code,
+                "headers": dict(outgoing_response.headers),
+                "body": response_body,
+            }
+            received_webhooks.appendleft(entry)
+            if config["delay_seconds"] > 0:
+                await asyncio.sleep(config["delay_seconds"])
+            return outgoing_response
         else:
             config["fail_next_n"] = 0
             config["fail_count"] = 0
 
-    return Response(status_code=config["status_code"])
+    outgoing_response = JSONResponse(
+        content=response_body,
+        status_code=response_status_code,
+        headers=response_headers,
+    )
+    entry["response"] = {
+        "status_code": outgoing_response.status_code,
+        "headers": dict(outgoing_response.headers),
+        "body": response_body,
+    }
+    received_webhooks.appendleft(entry)
+
+    if config["delay_seconds"] > 0:
+        await asyncio.sleep(config["delay_seconds"])
+
+    return outgoing_response
 
 
 @app.get("/webhooks")
@@ -137,10 +179,10 @@ a{color:inherit;text-decoration:none}
 .live-dot.off{background:#d1d5db}
 .topbar-right{display:flex;align-items:center;gap:8px}
 
-.layout{display:grid;grid-template-columns:288px 1fr;height:calc(100vh - 52px)}
+.layout{display:grid;grid-template-columns:288px minmax(0,1fr);min-height:calc(100vh - 52px);align-items:start}
 
 /* sidebar */
-.sidebar{background:#fff;border-right:1px solid #e5e7eb;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:24px}
+.sidebar{background:#fff;border-right:1px solid #e5e7eb;overflow-y:auto;padding:20px 16px;display:flex;flex-direction:column;gap:24px;position:sticky;top:52px;max-height:calc(100vh - 52px)}
 .section-label{font-size:11px;font-weight:600;color:#6b7280;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:10px}
 
 /* mode pills */
@@ -200,7 +242,7 @@ a{color:inherit;text-decoration:none}
 .status-bar.purple .status-text{color:#4338ca}
 
 /* main area */
-.main{display:flex;flex-direction:column;overflow:hidden}
+.main{display:flex;flex-direction:column;min-width:0;overflow:visible}
 .main-header{padding:14px 20px;border-bottom:1px solid #e5e7eb;background:#fff;display:flex;align-items:center;justify-content:space-between}
 .main-title{font-size:13px;font-weight:600;color:#111827}
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
@@ -213,7 +255,7 @@ a{color:inherit;text-decoration:none}
 .badge-indigo{background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe}
 
 /* webhook list */
-.webhook-list{overflow-y:auto;flex:1;padding:12px 20px;display:flex;flex-direction:column;gap:6px}
+.webhook-list{padding:12px 20px;display:flex;flex-direction:column;gap:6px}
 
 /* webhook card */
 .wh-card{background:#fff;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;transition:border-color 0.15s;cursor:pointer}
@@ -247,7 +289,7 @@ pre{background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;padding:12px;f
 .htable .hmac-key td:last-child{color:#059669}
 
 /* empty */
-.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:8px;color:#9ca3af}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:320px;gap:8px;color:#9ca3af}
 .empty-icon{width:40px;height:40px;background:#f3f4f6;border-radius:10px;display:flex;align-items:center;justify-content:center}
 .empty p{font-size:13px}
 .empty .sub{font-size:12px;color:#d1d5db}
@@ -356,6 +398,8 @@ pre{background:#f9fafb;border:1px solid #e5e7eb;border-radius:7px;padding:12px;f
 <script>
 let currentMode = 'normal';
 let refreshInterval = null;
+let openWebhookIds = new Set();
+let activeWebhookTabs = new Map();
 
 function setMode(mode) {
   currentMode = mode;
@@ -429,6 +473,8 @@ async function resetConfig() {
 
 async function clearWebhooks() {
   await fetch('/webhooks', { method: 'DELETE' });
+  openWebhookIds.clear();
+  activeWebhookTabs.clear();
   document.getElementById('webhook-list').innerHTML = emptyState();
   document.getElementById('count-badge').textContent = '0 received';
 }
@@ -451,9 +497,12 @@ function getHeader(headers, name) {
 function toggleCard(id) {
   const card = document.getElementById('wh-' + id);
   card.classList.toggle('open');
+  if (card.classList.contains('open')) openWebhookIds.add(id);
+  else openWebhookIds.delete(id);
 }
 
 function switchTab(id, tab) {
+  activeWebhookTabs.set(id, tab);
   const card = document.getElementById('wh-' + id);
   card.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   card.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
@@ -468,37 +517,52 @@ function renderWebhooks(webhooks) {
 
   if (webhooks.length === 0) { list.innerHTML = emptyState(); return; }
 
+  const visibleIds = new Set(webhooks.map(wh => wh.id));
+  openWebhookIds.forEach(id => { if (!visibleIds.has(id)) openWebhookIds.delete(id); });
+  activeWebhookTabs.forEach((_, id) => { if (!visibleIds.has(id)) activeWebhookTabs.delete(id); });
+
   list.innerHTML = webhooks.map(wh => {
     const eventType = getHeader(wh.headers, 'x-webhook-event-type') || '(unknown)';
     const eventId = getHeader(wh.headers, 'x-webhook-event-id');
     const sig = getHeader(wh.headers, 'x-webhook-signature');
     const shortId = eventId ? eventId.substring(0,8) + '…' : '';
+    const isOpen = openWebhookIds.has(wh.id);
+    const activeTab = activeWebhookTabs.get(wh.id) || 'payload';
 
     const bodyStr = typeof wh.body === 'object'
       ? JSON.stringify(wh.body, null, 2) : String(wh.body);
+    const responseStr = JSON.stringify(wh.response || {}, null, 2);
+    const responseStatus = wh.response && wh.response.status_code
+      ? wh.response.status_code : '';
+    const responseBadgeClass = responseStatus >= 500
+      ? 'badge-red' : responseStatus >= 400
+        ? 'badge-amber' : 'badge-green';
 
     const headersHtml = Object.entries(wh.headers || {}).map(([k, v]) => {
       const isHmac = k.toLowerCase() === 'x-webhook-signature';
       return `<tr class="${isHmac ? 'hmac-key' : ''}"><td>${k}</td><td>${v}</td></tr>`;
     }).join('');
 
-    return `<div class="wh-card" id="wh-${wh.id}" onclick="toggleCard(${wh.id})">
+    return `<div class="wh-card${isOpen ? ' open' : ''}" id="wh-${wh.id}" onclick="toggleCard(${wh.id})">
       <div class="wh-header">
         <span class="wh-seq">#${wh.id}</span>
         <span class="wh-event">${eventType}</span>
         ${shortId ? `<span class="wh-eid">${shortId}</span>` : ''}
         ${sig ? `<span class="badge badge-green">✓ HMAC</span>` : ''}
+        ${responseStatus ? `<span class="badge ${responseBadgeClass}">HTTP ${responseStatus}</span>` : ''}
         <span class="wh-time">${fmtTime(wh.received_at)}</span>
       </div>
       <div class="wh-body">
         <div class="tabs" onclick="event.stopPropagation()">
-          <div class="tab active" data-tab="payload" onclick="switchTab(${wh.id},'payload')">Payload</div>
-          <div class="tab" data-tab="headers" onclick="switchTab(${wh.id},'headers')">Headers</div>
+          <div class="tab ${activeTab === 'payload' ? 'active' : ''}" data-tab="payload" onclick="switchTab(${wh.id},'payload')">Payload</div>
+          <div class="tab ${activeTab === 'headers' ? 'active' : ''}" data-tab="headers" onclick="switchTab(${wh.id},'headers')">Headers</div>
+          <div class="tab ${activeTab === 'response' ? 'active' : ''}" data-tab="response" onclick="switchTab(${wh.id},'response')">Response</div>
         </div>
-        <div class="tab-content active" data-content="payload"><pre>${bodyStr}</pre></div>
-        <div class="tab-content" data-content="headers" onclick="event.stopPropagation()">
+        <div class="tab-content ${activeTab === 'payload' ? 'active' : ''}" data-content="payload"><pre>${bodyStr}</pre></div>
+        <div class="tab-content ${activeTab === 'headers' ? 'active' : ''}" data-content="headers" onclick="event.stopPropagation()">
           <table class="htable"><tbody>${headersHtml}</tbody></table>
         </div>
+        <div class="tab-content ${activeTab === 'response' ? 'active' : ''}" data-content="response"><pre>${responseStr}</pre></div>
       </div>
     </div>`;
   }).join('');
