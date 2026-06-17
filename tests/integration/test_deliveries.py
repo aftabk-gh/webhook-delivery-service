@@ -1,5 +1,7 @@
 """Integration tests for Celery delivery behavior."""
 
+import hashlib
+import hmac
 from collections.abc import Generator
 from typing import Any
 
@@ -217,9 +219,49 @@ def test_deliver_to_endpoint_once_marks_success_after_200_response(
     assert saved_delivery.response_body == "ok"
     assert saved_delivery.latency_ms is not None
     assert posted["url"] == endpoint.url
-    assert posted["json"] == event.payload
+    assert posted["data"] == b'{"order_id":"ord_123"}'
     assert posted["headers"]["X-Webhook-Event-ID"] == str(event.id)
     assert posted["headers"]["X-Webhook-Event-Type"] == event.event_type
+
+
+def test_delivery_signature_header(
+    sync_db_session: Session,
+    patch_worker_session_factory: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tenant, event, endpoint, *_ = create_tenant_event_and_endpoints(sync_db_session)
+    delivery = Delivery(
+        tenant_id=tenant.id,
+        event_id=event.id,
+        endpoint_id=endpoint.id,
+        status="pending",
+    )
+    sync_db_session.add(delivery)
+    sync_db_session.commit()
+    delivery_id = delivery.id
+
+    posted: dict[str, Any] = {}
+    patch_http_client(monkeypatch, status_code=200, text="ok", posted=posted)
+
+    delivery_service.deliver_to_endpoint_once(
+        delivery_id=str(delivery_id),
+        tenant_id=str(tenant.id),
+    )
+
+    signature_header = posted["headers"]["X-Webhook-Signature"]
+    expected_signature = hmac.new(
+        tenant.signing_secret.encode(),
+        posted["data"],
+        hashlib.sha256,
+    ).hexdigest()
+    tampered_signature = hmac.new(
+        tenant.signing_secret.encode(),
+        b'{"order_id":"tampered"}',
+        hashlib.sha256,
+    ).hexdigest()
+
+    assert signature_header == f"sha256={expected_signature}"
+    assert signature_header != f"sha256={tampered_signature}"
 
 
 def test_deliver_to_endpoint_once_schedules_retry_after_500_response(
@@ -419,13 +461,13 @@ def patch_http_client(
         def post(
             self,
             url: str,
-            json: dict[str, Any],
+            data: bytes,
             headers: dict[str, str],
             timeout: float,
         ) -> FakeResponse:
             self.timeout = timeout
             if posted is not None:
-                posted.update({"url": url, "json": json, "headers": headers})
+                posted.update({"url": url, "data": data, "headers": headers})
             return FakeResponse()
 
     monkeypatch.setattr(requests, "Session", FakeClient)
@@ -445,7 +487,7 @@ def patch_http_client_exception(
         def post(
             self,
             url: str,
-            json: dict[str, Any],
+            data: bytes,
             headers: dict[str, str],
             timeout: float,
         ) -> object:
