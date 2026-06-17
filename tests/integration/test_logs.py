@@ -1,6 +1,7 @@
 """Integration tests for delivery log APIs and queries."""
 
 from datetime import datetime, timedelta
+from uuid import uuid4
 
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +65,7 @@ async def seed_delivery_logs(
             status="success",
             attempt_number=1,
             http_status_code=200,
+            response_body="ok",
             latency_ms=10,
             created_at=now,
         ),
@@ -74,6 +76,7 @@ async def seed_delivery_logs(
             status="exhausted",
             attempt_number=3,
             http_status_code=500,
+            response_body="server error",
             latency_ms=20,
             created_at=now - timedelta(minutes=1),
         ),
@@ -84,6 +87,7 @@ async def seed_delivery_logs(
             status="pending",
             attempt_number=1,
             http_status_code=None,
+            response_body="waiting for retry",
             latency_ms=None,
             created_at=now - timedelta(minutes=2),
         ),
@@ -94,6 +98,7 @@ async def seed_delivery_logs(
             status="success",
             attempt_number=1,
             http_status_code=200,
+            response_body="other tenant ok",
             latency_ms=30,
             created_at=now + timedelta(minutes=1),
         ),
@@ -120,6 +125,7 @@ async def test_list_deliveries_returns_only_authenticated_tenant(
     returned_ids = {item["id"] for item in body["items"]}
 
     assert returned_ids == {str(delivery.id) for delivery in deliveries[:3]}
+    assert "response_body" not in body["items"][0]
     assert body["next_cursor"] is None
 
 
@@ -198,3 +204,57 @@ async def test_list_deliveries_paginates_with_cursor(
     assert second_page_ids == [str(deliveries[2].id)]
     assert set(first_page_ids).isdisjoint(second_page_ids)
     assert second_body["next_cursor"] is None
+
+
+async def test_get_delivery_returns_response_body(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    first_tenant, _, _, _, deliveries = await seed_delivery_logs(db_session)
+
+    response = await db_client.get(
+        f"/deliveries/{deliveries[0].id}/",
+        headers={"X-API-Key": first_tenant.api_key},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["id"] == str(deliveries[0].id)
+    assert body["response_body"] == "ok"
+
+
+async def test_get_delivery_returns_404_for_missing_delivery(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    first_tenant, *_ = await seed_delivery_logs(db_session)
+
+    response = await db_client.get(
+        f"/deliveries/{uuid4()}/",
+        headers={"X-API-Key": first_tenant.api_key},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "Delivery not found.",
+        "code": "DELIVERY_NOT_FOUND",
+    }
+
+
+async def test_get_delivery_returns_404_for_other_tenant(
+    db_client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    _, second_tenant, _, _, deliveries = await seed_delivery_logs(db_session)
+
+    response = await db_client.get(
+        f"/deliveries/{deliveries[0].id}/",
+        headers={"X-API-Key": second_tenant.api_key},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "Delivery not found.",
+        "code": "DELIVERY_NOT_FOUND",
+    }
