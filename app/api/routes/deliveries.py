@@ -6,8 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.dependencies.auth import get_current_tenant
 from app.database import get_db
 from app.models.tenant import Tenant
-from app.schemas.delivery import DeliveryListPageResponse, DeliveryListResponse
-from app.services.delivery import list_delivery_logs
+from app.schemas.delivery import (
+    DeliveryDetailResponse,
+    DeliveryListPageResponse,
+    DeliveryListResponse,
+)
+from app.services.delivery import get_delivery_log, list_delivery_logs
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
 
@@ -38,3 +42,21 @@ async def list_deliveries_route(
         items=items,
         next_cursor=page.next_cursor,
     )
+
+
+@router.get(
+    "/{delivery_id}/",
+    response_model=DeliveryDetailResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_delivery_route(
+    delivery_id: uuid.UUID,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> DeliveryDetailResponse:
+    delivery = await get_delivery_log(
+        session=db,
+        tenant=tenant,
+        delivery_id=delivery_id,
+    )
+    return DeliveryDetailResponse.model_validate(delivery)

@@ -43,6 +43,21 @@ async def list_deliveries_by_tenant(
     return list(result.scalars().all())
 
 
+async def get_delivery_by_id_for_tenant(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    delivery_id: uuid.UUID,
+) -> Delivery | None:
+    result = await session.execute(
+        select(Delivery).where(
+            Delivery.id == delivery_id,
+            Delivery.tenant_id == tenant_id,
+        )
+    )
+    # Run EXPLAIN ANALYZE on this query after seeding test data to confirm index scan.
+    return result.scalar_one_or_none()
+
+
 def get_event_for_tenant(
     session: Session,
     event_id: uuid.UUID,

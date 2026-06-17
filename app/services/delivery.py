@@ -12,7 +12,7 @@ from typing import Any
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import BadRequestError
+from app.core.exceptions import BadRequestError, NotFoundError
 from app.core.logging import get_logger
 from app.database import SessionLocal
 from app.models.delivery import Delivery
@@ -22,6 +22,7 @@ from app.models.tenant import Tenant
 from app.queries.delivery import (
     add_delivery,
     get_active_endpoint_for_tenant,
+    get_delivery_by_id_for_tenant,
     get_event_for_tenant,
     get_pending_delivery_for_update,
     get_tenant_by_id,
@@ -69,6 +70,22 @@ async def list_delivery_logs(
         next_cursor = _encode_delivery_cursor(page_items[-1])
 
     return DeliveryLogPage(items=page_items, next_cursor=next_cursor)
+
+
+async def get_delivery_log(
+    session: AsyncSession,
+    tenant: Tenant,
+    delivery_id: uuid.UUID,
+) -> Delivery:
+    delivery = await get_delivery_by_id_for_tenant(
+        session=session,
+        tenant_id=tenant.id,
+        delivery_id=delivery_id,
+    )
+    if delivery is None:
+        raise NotFoundError("Delivery not found.", code="DELIVERY_NOT_FOUND")
+
+    return delivery
 
 
 def _decode_delivery_cursor(

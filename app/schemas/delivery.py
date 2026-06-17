@@ -22,3 +22,7 @@ class DeliveryListResponse(BaseModel):
 class DeliveryListPageResponse(BaseModel):
     items: list[DeliveryListResponse]
     next_cursor: str | None
+
+
+class DeliveryDetailResponse(DeliveryListResponse):
+    response_body: str | None
