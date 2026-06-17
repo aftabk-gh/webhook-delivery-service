@@ -2,12 +2,31 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
 from app.models.tenant import Tenant
+
+
+async def list_deliveries_by_tenant(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    status: str | None = None,
+    endpoint_id: uuid.UUID | None = None,
+) -> list[Delivery]:
+    filters = [Delivery.tenant_id == tenant_id]
+    if status is not None:
+        filters.append(Delivery.status == status)
+    if endpoint_id is not None:
+        filters.append(Delivery.endpoint_id == endpoint_id)
+
+    result = await session.execute(
+        select(Delivery).where(*filters).order_by(Delivery.created_at.desc())
+    )
+    return list(result.scalars().all())
 
 
 def get_event_for_tenant(

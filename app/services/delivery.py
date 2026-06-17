@@ -8,12 +8,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.database import SessionLocal
 from app.models.delivery import Delivery
 from app.models.endpoint import Endpoint
 from app.models.event import Event
+from app.models.tenant import Tenant
 from app.queries.delivery import (
     add_delivery,
     get_active_endpoint_for_tenant,
@@ -21,6 +23,7 @@ from app.queries.delivery import (
     get_pending_delivery_for_update,
     get_tenant_by_id,
     list_active_matching_endpoints_for_tenant,
+    list_deliveries_by_tenant,
     list_due_pending_deliveries,
 )
 
@@ -28,6 +31,20 @@ logger = get_logger(__name__)
 
 TaskDispatcher = Callable[..., Any]
 RETRY_DELAYS_SECONDS = [30, 120, 600]
+
+
+async def list_delivery_logs(
+    session: AsyncSession,
+    tenant: Tenant,
+    status: str | None = None,
+    endpoint_id: uuid.UUID | None = None,
+) -> list[Delivery]:
+    return await list_deliveries_by_tenant(
+        session=session,
+        tenant_id=tenant.id,
+        status=status,
+        endpoint_id=endpoint_id,
+    )
 
 
 def fan_out_event_deliveries(
