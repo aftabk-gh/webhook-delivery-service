@@ -1,13 +1,16 @@
 # webhook-delivery-service
 
-Production-grade webhook delivery infrastructure. Multi-tenant event ingestion, reliable HTTP delivery with retries, circuit breaker, HMAC signing, rate limiting, and semantic log search via pgvector.
+Production-grade webhook delivery infrastructure for multi-tenant event ingestion,
+reliable HTTP delivery, retries, HMAC signing, and crash recovery.
 
-Built for learning senior backend/distributed systems concepts.
+Stack: FastAPI, PostgreSQL, Redis, Celery, and Docker Compose.
 
-## Stack
+## Links
 
-FastAPI, PostgreSQL, Redis, Celery, Docker, pgvector, OpenAI embeddings.
-
+- [Architecture](#architecture)
+- [Local Setup](#local-setup)
+- [Architecture Decisions](docs/adr/)
+- [Known Gaps](docs/known-gaps.md)
 
 ## Architecture
 
@@ -109,27 +112,31 @@ graph TB
 
 > The two Celery queues are isolated on purpose: a backlog of slow outbound HTTP calls on the `delivery` queue never blocks event ingestion via the `default` queue.
 
-## Important Files
+## Local Setup
 
-- `AGENTS.md` — mandatory AI behavior rules. Follow always.
-- `BREAKDOWN.md` — step-by-step project roadmap.
-- `docs/adr/` — architecture decisions.
-- `prompts/` — reusable learning/review prompts.
+Create your local `.env` file:
 
-## Current Development Rules
+```bash
+cp .env.example .env
+```
 
-1. Follow `AGENTS.md` first.
-2. Use `BREAKDOWN.md` only to understand the current step.
-3. Do not implement anything listed under "Write Yourself".
-4. Keep architecture: API → Service → Data Layer → DB.
-5. Enforce tenant isolation on every tenant-owned query.
-6. If prompt starts with `DISCUSS:`, give hints only.
-7. If prompt starts with `IMPLEMENT:`, generate allowed production-ready code.
-8. If a task conflicts with `AGENTS.md`, follow `AGENTS.md`.
+Build and start the local Docker stack:
 
-## Current Step
+```bash
+docker compose up -d --build
+```
 
-Currently working on: **Step 5**
+Seed local development data from inside the API container:
+
+```bash
+docker compose exec api python -m app.scripts.seed
+```
+
+Reset the database and seed fresh data:
+
+```bash
+docker compose exec api python -m app.scripts.seed --reset
+```
 
 ## Run Tests
 
@@ -149,26 +156,6 @@ Run the test suite:
 
 ```bash
 uv run pytest
-```
-
-## Seed Data
-
-Start the local Docker stack:
-
-```bash
-docker compose up -d
-```
-
-Seed local development data from inside the API container:
-
-```bash
-docker compose exec api python -m app.scripts.seed
-```
-
-Reset the database and seed fresh data:
-
-```bash
-docker compose exec api python -m app.scripts.seed --reset
 ```
 
 ## Migrations
