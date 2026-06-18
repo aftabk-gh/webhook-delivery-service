@@ -1,42 +1,37 @@
 # ADR: SELECT FOR UPDATE SKIP LOCKED for Delivery Processing
 
-## Status
-Accepted
-
-## The Problem
+## Problem
 
 Multiple Celery workers run at the same time and pull from the same delivery queue.
 Two workers can pick up the same `deliver_to_endpoint` task simultaneously and both
 try to process the same delivery row.
 
 Without any protection, both workers make the HTTP POST to the external endpoint.
-The receiver gets the same webhook twice. No error is thrown. No log tells you this
-happened. Silent duplicate.
+The receiver gets the same webhook twice.
 
-## What Happens Without SKIP LOCKED
+## Decision
 
-If you use `SELECT FOR UPDATE` alone:
+Use `SELECT FOR UPDATE SKIP LOCKED` when a worker claims a pending delivery row.
 
-- Worker 1 locks the row and starts processing
-- Worker 2 hits the same row and blocks — it just waits
-- Worker 1 finishes, commits, releases the lock
-- Worker 2 now acquires the lock and processes the same row again
-- Duplicate HTTP POST
+The first worker locks the row and processes it. A second worker trying to claim
+the same row skips it and exits cleanly.
 
-The lock alone does not prevent duplicates. It just serialises them.
+## Alternatives and Tradeoffs
 
-## The Fix
+`SELECT FOR UPDATE` without `SKIP LOCKED` would make the second worker wait. After
+the first worker commits, the second worker could continue and process stale work.
+That can still lead to duplicate delivery.
 
-Add `SKIP LOCKED` to the select:
+Application-level checks are not enough because the race happens between workers.
+The database row lock is the shared truth both workers must respect.
 
-- Worker 1 locks the row
-- Worker 2 sees the row is locked, skips it, gets nothing back, exits cleanly
-- One delivery. The second worker is a no-op.
+`SKIP LOCKED` makes the second worker a no-op instead of a duplicate sender. The
+tradeoff is that workers need to treat "no row returned" as a normal outcome.
 
-The `status = 'pending'` filter in the query does the rest. Once Worker 1 commits
-and sets status to `success`, no future worker will ever pick that row up again
-regardless of locking — because pending is gone.
+## Consequences
 
-## One Line
-
-Lock the row or skip it entirely — never wait.
+- Only one worker can claim a delivery row.
+- Duplicate task pickup becomes safe.
+- Workers must handle skipped rows without treating them as errors.
+- The delivery query must stay in the raw SQL data layer because this is
+  concurrency-critical.

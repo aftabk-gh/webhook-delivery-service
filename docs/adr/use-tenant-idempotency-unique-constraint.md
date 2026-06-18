@@ -1,31 +1,39 @@
 # ADR: Unique Constraint for Event Idempotency Keys
 
-## Status
-Accepted
-
 ## Problem
+
 Idempotency must be enforced even if the application has a bug or two requests race.
 
-It also has to be tenant-scoped. Two tenants may use the same `idempotency_key`, but one tenant must not duplicate its own key.
+It also has to be tenant-scoped. Two tenants may use the same `idempotency_key`,
+but one tenant must not create two events with the same key.
 
 ## Decision
+
 Add a database unique constraint on:
 
 ```sql
 (tenant_id, idempotency_key)
 ```
 
-## Reasoning
 This makes the database the final guard against duplicates.
 
 The same key can be reused by different tenants safely, but a single tenant cannot create the same idempotent event twice.
 
-## Alternatives Considered
-**Unique idempotency key globally** — too strict. Different tenants could accidentally block each other.
+## Alternatives and Tradeoffs
 
-**Application-only check** — not safe. It can fail during concurrent requests.
+A globally unique `idempotency_key` would be simpler, but it would be wrong for a
+multi-tenant system. Different tenants could accidentally block each other by
+using the same key.
+
+An application-only check would avoid a database constraint, but it would not be
+safe during concurrent requests.
+
+The tenant-scoped unique constraint is slightly more specific, but it matches the
+real business rule.
 
 ## Consequences
-- Tenant isolation is preserved
-- Duplicate event creation is blocked at the database level
-- The `ON CONFLICT` insert has a clear conflict target
+
+- Tenant isolation is preserved.
+- Duplicate event creation is blocked at the database level.
+- The same idempotency key can be reused by different tenants.
+- `INSERT ... ON CONFLICT` has a clear conflict target.

@@ -1,9 +1,6 @@
 # ADR: Two Celery Queues (default and delivery)
 
-## Status
-Accepted
-
-## The Problem
+## Problem
 
 Both tasks could run on a single shared queue. The issue is they have completely
 different characteristics.
@@ -19,17 +16,26 @@ tasks sitting behind them. New events stop being processed even though the actua
 bottleneck is outbound HTTP — not ingestion. The two workloads are interfering with
 each other for no reason.
 
-## The Fix
+## Decision
 
-Two queues. `default` for fan-out, `delivery` for HTTP delivery.
+Use two Celery queues:
 
-This means a delivery backlog never touches fan-out. Event ingestion keeps moving
-regardless of how many slow endpoints are piling up on the delivery side.
+- `default` for fan-out tasks.
+- `delivery` for outbound HTTP delivery tasks.
 
-It also lets you scale them independently. If delivery is the bottleneck, point more
-workers at the `delivery` queue. The `default` queue stays unaffected.
+This keeps fast fan-out work separate from slower network delivery work.
 
-## One Line
+## Alternatives and Tradeoffs
 
-Different workloads need different queues — so a slow external endpoint never backs
-up event ingestion.
+A single queue would be simpler to configure. It would also make slow delivery
+tasks compete with fan-out tasks.
+
+Two queues require more worker configuration. In return, delivery workers can be
+scaled independently, and a delivery backlog does not stop fan-out.
+
+## Consequences
+
+- Event fan-out can keep moving even when outbound delivery is slow.
+- More workers can be assigned to the `delivery` queue when needed.
+- Celery configuration is slightly more complex.
+- Queue names become part of the operational model.

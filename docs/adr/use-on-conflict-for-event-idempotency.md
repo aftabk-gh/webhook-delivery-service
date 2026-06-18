@@ -1,30 +1,36 @@
 # ADR: ON CONFLICT for Event Idempotency
 
-## Status
-Accepted
-
 ## Problem
+
 Two identical event requests can arrive at the same time.
 
-If the code first checks for an existing event and then inserts a new one, both requests can see "nothing exists yet" and both try to create the event.
+If the application checks for an existing event and then inserts a new one, both
+requests can race. They can both see that no event exists yet, then both try to
+create one.
+
+That would create duplicate events and duplicate deliveries.
 
 ## Decision
+
 Use PostgreSQL `INSERT ... ON CONFLICT DO NOTHING` for event idempotency.
 
-## Reasoning
-The database is the only place that can safely decide the winner when two requests race.
+The database is the safest place to decide which request wins during a race.
 
-One request inserts the event. The other request hits the conflict and gets the existing event ID instead of creating a duplicate.
+One request inserts the event. The duplicate request hits the conflict and gets
+the existing event instead of creating a second one.
 
-This keeps the API behavior simple:
+## Alternatives and Tradeoffs
 
-- new `idempotency_key` -> create event and dispatch Celery task
-- repeated `idempotency_key` -> return original event ID and do not dispatch again
+The main alternative is `SELECT` then `INSERT`. That is easier to read at first,
+but it is unsafe under concurrency unless extra locking is added.
 
-## Alternatives Considered
-**SELECT then INSERT** — easier to read, but unsafe under concurrency.
+Using `ON CONFLICT` pushes the race handling into PostgreSQL. The tradeoff is
+that the code is a little more database-specific, and it requires a clear unique
+constraint.
 
 ## Consequences
-- Prevents duplicate events during concurrent requests
-- Prevents duplicate Celery dispatch for the same event creation request
-- Requires a database unique constraint to define what counts as a duplicate
+
+- Concurrent duplicate requests do not create duplicate events.
+- Duplicate idempotency keys return the existing event.
+- Celery dispatch only happens for the request that creates the event.
+- The behavior depends on a database unique constraint.
