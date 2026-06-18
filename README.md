@@ -177,5 +177,3 @@ docker compose exec api python -m app.scripts.seed --reset
 docker-compose exec api alembic revision --autogenerate -m "your message"
 docker-compose exec api alembic upgrade head
 ```
-
-![architecture](image.png)
